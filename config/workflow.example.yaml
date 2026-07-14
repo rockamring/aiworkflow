@@ -1,0 +1,47 @@
+repo:
+  include:
+    - "**/*.py"
+    - "**/*.ts"
+    - "**/*.tsx"
+    - "**/*.js"
+    - "**/*.jsx"
+    - "**/*.md"
+    - "**/*.json"
+    - "**/*.yaml"
+    - "**/*.yml"
+  exclude:
+    - ".git/**"
+    - ".venv/**"
+    - "venv/**"
+    - "node_modules/**"
+    - "dist/**"
+    - "build/**"
+    - "runs/**"
+
+knowledge:
+  docs_paths:
+    - "docs"
+    - "knowledge"
+    - "skills"
+    - "AGENTS.md"
+    - "README.md"
+
+neo4j:
+  uri: "${NEO4J_URI}"
+  user: "${NEO4J_USER}"
+  password: "${NEO4J_PASSWORD}"
+
+model:
+  base_url: "${MODEL_BASE_URL}"
+  api_key: "${MODEL_API_KEY}"
+  model: "${MODEL_NAME}"
+  timeout_seconds: 90
+
+verification:
+  commands:
+    - name: "tests"
+      command: "python -m pytest"
+
+workflow:
+  max_retries: 3
+  output_dir: "runs"
