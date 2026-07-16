@@ -25,6 +25,7 @@ class SymbolRecord:
     name: str
     kind: str
     line: int
+    container: str = ""
 
 
 @dataclass(slots=True)
@@ -110,7 +111,7 @@ class Neo4jGraphStore:
                 """
                 MATCH (f:File {repo_id: $repo_id, path: $file_path})
                 MERGE (s:Symbol {repo_id: $repo_id, file_path: $file_path, name: $name, line: $line})
-                SET s.kind = $kind
+                SET s.kind = $kind, s.container = $container
                 MERGE (f)-[:CONTAINS]->(s)
                 """,
                 repo_id=record.repo_id,
@@ -118,6 +119,7 @@ class Neo4jGraphStore:
                 name=record.name,
                 kind=record.kind,
                 line=record.line,
+                container=record.container,
             )
 
     def upsert_document(self, record: DocumentRecord) -> None:
@@ -143,7 +145,8 @@ class Neo4jGraphStore:
                 MATCH (n)
                 WHERE n.repo_id = $repo_id AND (n:Document OR n:Rule OR n:File OR n:Symbol)
                 RETURN labels(n) AS labels, n.path AS path, n.file_path AS file_path,
-                       n.name AS name, n.kind AS kind, n.content AS content, n.tags AS tags, n.line AS line
+                       n.name AS name, n.kind AS kind, n.content AS content, n.tags AS tags,
+                       n.line AS line, n.container AS container
                 LIMIT 250
                 """,
                 repo_id=repo_id,
@@ -207,10 +210,17 @@ class InMemoryGraphStore:
         for symbol in self.symbols:
             if symbol.repo_id != repo_id:
                 continue
-            text = f"{symbol.kind} {symbol.name} in {symbol.file_path}:{symbol.line}"
+            text = _symbol_text(symbol.kind, symbol.name, symbol.file_path, symbol.line, symbol.container)
             score = _score_text(text, terms, set(tags))
             if score > 0:
                 chunks.append(KnowledgeChunk(symbol.file_path, "symbol", text, score, []))
+        for file in self.files:
+            if file.repo_id != repo_id:
+                continue
+            text = f"{file.path}\n{_truncate(file.content)}"
+            score = _score_text(text, terms, set(tags))
+            if score > 0:
+                chunks.append(KnowledgeChunk(file.path, "file", text, score, []))
         return sorted(chunks, key=lambda item: item.score, reverse=True)[:limit]
 
     def close(self) -> None:
@@ -228,6 +238,14 @@ def language_for(path: Path) -> str:
         ".json": "json",
         ".yaml": "yaml",
         ".yml": "yaml",
+        ".cpp": "cpp",
+        ".cc": "cpp",
+        ".cxx": "cpp",
+        ".h": "cpp",
+        ".hpp": "cpp",
+        ".cs": "csharp",
+        ".lua": "lua",
+        ".uasset": "unreal-asset",
     }.get(path.suffix.lower(), path.suffix.lower().lstrip(".") or "text")
 
 
@@ -254,5 +272,10 @@ def _row_text(row: object) -> str:
     line = getter("line")
     content = getter("content")
     if name:
-        return f"{getter('kind') or 'symbol'} {name} at {getter('file_path')}:{line}"
+        return _symbol_text(str(getter("kind") or "symbol"), str(name), str(getter("file_path")), int(line or 0), str(getter("container") or ""))
     return str(content or getter("path") or "")
+
+
+def _symbol_text(kind: str, name: str, file_path: str, line: int, container: str = "") -> str:
+    owner = f" in {container}" if container else ""
+    return f"{kind} {name}{owner} at {file_path}:{line}"

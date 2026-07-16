@@ -15,7 +15,25 @@ ENV_PATTERN = re.compile(r"^\$\{([A-Z0-9_]+)\}$")
 
 @dataclass(slots=True)
 class RepoConfig:
-    include: list[str] = field(default_factory=lambda: ["**/*"])
+    include: list[str] = field(default_factory=lambda: [
+        "**/*.py",
+        "**/*.ts",
+        "**/*.tsx",
+        "**/*.js",
+        "**/*.jsx",
+        "**/*.md",
+        "**/*.json",
+        "**/*.yaml",
+        "**/*.yml",
+        "**/*.cpp",
+        "**/*.cc",
+        "**/*.cxx",
+        "**/*.h",
+        "**/*.hpp",
+        "**/*.cs",
+        "**/*.lua",
+        "**/*.uasset",
+    ])
     exclude: list[str] = field(default_factory=lambda: [".git/**", "node_modules/**", ".venv/**", "venv/**", "runs/**"])
 
 

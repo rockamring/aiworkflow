@@ -28,7 +28,11 @@ def test_workflow_runs_with_mock_model_and_noop_verification(tmp_path: Path, mon
     assert state.repo_meta["repo_id"] == report.repo_id
     assert state.verify_report["passed"] is True
     assert "Mock AI Diff" in state.ai_diff
+    assert "Mock AI Diff" in state.review_report
+    assert state.evaluation["verify_passed"] is True
+    assert any(step["node"] == "generate" for step in state.workflow_steps)
     assert (tmp_path / state.repo_meta["output_dir"] / "final_report.md").exists()
+    assert (tmp_path / state.repo_meta["output_dir"] / "review_report.md").exists()
 
 
 def test_workflow_retries_failed_verification(tmp_path: Path, monkeypatch):
@@ -50,3 +54,4 @@ def test_workflow_retries_failed_verification(tmp_path: Path, monkeypatch):
 
     assert state.verify_report["passed"] is False
     assert state.retry_count == 2
+    assert state.error_log

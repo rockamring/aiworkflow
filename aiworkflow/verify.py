@@ -1,27 +1,18 @@
 from __future__ import annotations
 
-import re
 import subprocess
 import time
 from dataclasses import asdict
 from pathlib import Path
 
 from .config import VerificationConfig
+from .policy import CommandPolicy
 from .state import VerificationResult
 
 
-DANGEROUS_PATTERNS = [
-    r"\brm\s+-rf\b",
-    r"\bdel\s+/[fq]\b",
-    r"\brmdir\s+/s\b",
-    r"\bgit\s+reset\s+--hard\b",
-    r"\bgit\s+clean\b",
-    r"\bformat\b",
-]
-
-
-def run_verification(repo: Path, config: VerificationConfig) -> list[VerificationResult]:
+def run_verification(repo: Path, config: VerificationConfig, policy: CommandPolicy | None = None) -> list[VerificationResult]:
     repo = repo.resolve()
+    policy = policy or CommandPolicy()
     if not config.commands:
         return [
             VerificationResult(
@@ -32,11 +23,15 @@ def run_verification(repo: Path, config: VerificationConfig) -> list[Verificatio
                 stdout="未配置 verification.commands，跳过校验。",
                 stderr="",
                 duration_seconds=0.0,
+                policy_allowed=True,
+                policy_reason="未配置校验命令",
             )
         ]
+
     results = []
     for command in config.commands:
-        if not is_safe_verification_command(command.command):
+        decision = policy.evaluate(command.command, repo)
+        if not decision.allowed:
             results.append(
                 VerificationResult(
                     name=command.name,
@@ -44,11 +39,14 @@ def run_verification(repo: Path, config: VerificationConfig) -> list[Verificatio
                     passed=False,
                     exit_code=126,
                     stdout="",
-                    stderr="命令被安全策略拒绝：校验流水线不执行明显破坏性命令。",
+                    stderr="命令被安全策略拒绝。",
                     duration_seconds=0.0,
+                    policy_allowed=False,
+                    policy_reason=decision.reason,
                 )
             )
             continue
+
         started = time.perf_counter()
         completed = subprocess.run(
             command.command,
@@ -67,20 +65,24 @@ def run_verification(repo: Path, config: VerificationConfig) -> list[Verificatio
                 stdout=_tail(completed.stdout),
                 stderr=_tail(completed.stderr),
                 duration_seconds=round(time.perf_counter() - started, 3),
+                policy_allowed=True,
+                policy_reason=decision.reason,
             )
         )
     return results
 
 
 def is_safe_verification_command(command: str) -> bool:
-    lowered = command.lower()
-    return not any(re.search(pattern, lowered) for pattern in DANGEROUS_PATTERNS)
+    return CommandPolicy().evaluate(command, Path.cwd()).allowed
 
 
 def verification_summary(results: list[VerificationResult]) -> dict[str, object]:
     return {
         "passed": all(item.passed for item in results),
         "results": [asdict(item) for item in results],
+        "duration_seconds": round(sum(item.duration_seconds for item in results), 3),
+        "commands_total": len(results),
+        "commands_rejected": sum(1 for item in results if not item.policy_allowed),
     }
 
 
@@ -92,6 +94,8 @@ def format_verify_log(results: list[VerificationResult]) -> str:
             f"[{status}] {item.name}\n"
             f"command: {item.command}\n"
             f"exit_code: {item.exit_code}\n"
+            f"policy_allowed: {item.policy_allowed}\n"
+            f"policy_reason: {item.policy_reason}\n"
             f"stdout:\n{item.stdout}\n"
             f"stderr:\n{item.stderr}\n"
         )

@@ -22,6 +22,8 @@ class VerificationResult:
     stdout: str
     stderr: str
     duration_seconds: float
+    policy_allowed: bool = True
+    policy_reason: str = ""
 
 
 @dataclass(slots=True)
@@ -34,9 +36,14 @@ class DevWorkflowState:
     target_model: str = "mock"
     required_knowledge_tags: list[str] = field(default_factory=list)
     knowledge_chunks: list[KnowledgeChunk] = field(default_factory=list)
+    search_stats: dict[str, Any] = field(default_factory=dict)
+    context_summary: dict[str, Any] = field(default_factory=dict)
     system_prompt: str = ""
     ai_diff: str = ""
+    review_report: str = ""
     verify_report: dict[str, Any] = field(default_factory=dict)
+    evaluation: dict[str, Any] = field(default_factory=dict)
+    workflow_steps: list[dict[str, Any]] = field(default_factory=list)
     retry_count: int = 0
     human_approval: bool = False
     final_report: str = ""
