@@ -1,3 +1,10 @@
+"""目标仓库索引入口。
+
+ingest 负责把一个实际工程转成 GraphStore 中的 File、Symbol、Document
+和 Rule。当前符号提取是轻量实现，优先跑通 C++/C#/Lua/Python 的 MVP；
+后续可替换为 tree-sitter、clangd 或 Roslyn。
+"""
+
 from __future__ import annotations
 
 import ast
@@ -13,6 +20,8 @@ from .graph import DocumentRecord, FileRecord, GraphStore, SymbolRecord, languag
 
 @dataclass(slots=True)
 class IngestReport:
+    """一次 ingest 的统计结果。"""
+
     repo_id: str
     files_indexed: int
     symbols_indexed: int
@@ -20,12 +29,24 @@ class IngestReport:
 
 
 def repo_id_for(repo: Path) -> str:
+    """为目标工程生成稳定 repo_id。
+
+    repo_id 使用目录名 + 绝对路径 hash，支持多个同名工程在同一图谱中共存。
+    """
+
     resolved = repo.resolve()
     digest = hashlib.sha1(str(resolved).encode("utf-8")).hexdigest()[:12]
     return f"{resolved.name}-{digest}"
 
 
 def ingest_repo(repo: Path, config: AppConfig, store: GraphStore, clear: bool = True) -> IngestReport:
+    """索引目标仓库到 GraphStore。
+
+    主流程分两段：先按 include/exclude 扫描代码和配置文件，写入 File 并
+    提取 Symbol；再扫描 knowledge.docs_paths，把文档写入 Document/Rule。
+    对 `.uasset` 等二进制资产只写占位信息，不尝试解析内容。
+    """
+
     repo = repo.resolve()
     if not repo.exists() or not repo.is_dir():
         raise ValueError(f"目标仓库不存在或不是目录: {repo}")
@@ -67,6 +88,8 @@ def ingest_repo(repo: Path, config: AppConfig, store: GraphStore, clear: bool = 
 
 
 def iter_repo_files(repo: Path, include: list[str], exclude: list[str]):
+    """按配置枚举需要进入索引的文件。"""
+
     for path in repo.rglob("*"):
         if not path.is_file():
             continue
@@ -79,6 +102,8 @@ def iter_repo_files(repo: Path, include: list[str], exclude: list[str]):
 
 
 def iter_knowledge_docs(repo: Path, docs_paths: list[str]):
+    """枚举知识库文档，AGENTS.md 会被标记为 rule。"""
+
     seen: set[Path] = set()
     for raw in docs_paths:
         path = (repo / raw).resolve()
@@ -94,6 +119,8 @@ def iter_knowledge_docs(repo: Path, docs_paths: list[str]):
 
 
 def extract_symbols(path: Path, rel_path: str, content: str, repo_id: str) -> list[SymbolRecord]:
+    """按语言选择符号提取器。"""
+
     suffix = path.suffix.lower()
     if suffix == ".py":
         return _extract_python_symbols(rel_path, content, repo_id)
@@ -107,6 +134,8 @@ def extract_symbols(path: Path, rel_path: str, content: str, repo_id: str) -> li
 
 
 def infer_tags(text: str) -> list[str]:
+    """从文档内容中推断粗粒度知识标签。"""
+
     mapping = {
         "crash": ["crash", "崩溃"],
         "performance": ["performance", "性能", "优化"],
@@ -138,6 +167,12 @@ def _extract_python_symbols(rel_path: str, content: str, repo_id: str) -> list[S
 
 
 def _extract_cpp_symbols(rel_path: str, content: str, repo_id: str) -> list[SymbolRecord]:
+    """轻量 C++ 符号提取。
+
+    这里只覆盖常见 class/struct/enum/function 形态，目的是为 Context
+    提供初步锚点；复杂宏、模板和 UE 反射关系应交给后续 clangd/UHT 索引。
+    """
+
     records: list[SymbolRecord] = []
     class_pattern = re.compile(r"\b(class|struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)")
     function_pattern = re.compile(
@@ -161,6 +196,8 @@ def _extract_cpp_symbols(rel_path: str, content: str, repo_id: str) -> list[Symb
 
 
 def _extract_csharp_symbols(rel_path: str, content: str, repo_id: str) -> list[SymbolRecord]:
+    """轻量 C# 符号提取，用于 Unity/工具链项目的初步索引。"""
+
     records: list[SymbolRecord] = []
     type_pattern = re.compile(r"\b(class|struct|interface|enum)\s+([A-Za-z_][A-Za-z0-9_]*)")
     method_pattern = re.compile(
@@ -185,6 +222,8 @@ def _extract_csharp_symbols(rel_path: str, content: str, repo_id: str) -> list[S
 
 
 def _extract_lua_symbols(rel_path: str, content: str, repo_id: str) -> list[SymbolRecord]:
+    """轻量 Lua 符号提取，覆盖 table 和常见 function 写法。"""
+
     records: list[SymbolRecord] = []
     function_pattern = re.compile(r"^\s*(?:local\s+)?function\s+([A-Za-z_][A-Za-z0-9_:\.]*)")
     assignment_pattern = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_:\.]*)\s*=\s*function\s*\(")

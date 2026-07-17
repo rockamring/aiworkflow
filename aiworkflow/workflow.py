@@ -1,3 +1,10 @@
+"""节点化 AI 工作流编排。
+
+这个模块是当前 Agent OS 单体内核的主控层：它不直接关心 Neo4j、
+Prompt 模板或模型网关的实现细节，只负责把一次开发任务拆成一组
+可审计节点，并把每个节点产生的上下文、patch、验证和报告落盘。
+"""
+
 from __future__ import annotations
 
 import json
@@ -21,6 +28,13 @@ from .verify import format_verify_log, run_verification, verification_summary
 
 @dataclass(slots=True)
 class WorkflowRuntime:
+    """一次工作流运行期间共享的运行时依赖。
+
+    它把配置、目标仓库、存储、模型和 ContextService 聚合起来，避免
+    每个节点自行创建依赖。后续如果演进为 DAG 或服务化，这里会自然
+    变成节点执行上下文。
+    """
+
     repo: Path
     config: AppConfig
     store: GraphStore
@@ -30,10 +44,17 @@ class WorkflowRuntime:
 
 
 WorkflowNode = Callable[[DevWorkflowState, WorkflowRuntime], None]
+# 进程内节点注册表：当前足够支撑 MVP，后续可以替换成 DAG 引擎。
 NODE_REGISTRY: dict[str, WorkflowNode] = {}
 
 
 def workflow_node(name: str) -> Callable[[WorkflowNode], WorkflowNode]:
+    """注册一个工作流节点。
+
+    装饰器形式让节点定义和节点名称靠近，避免在主流程里维护一份
+    容易漂移的硬编码映射。
+    """
+
     def decorator(func: WorkflowNode) -> WorkflowNode:
         NODE_REGISTRY[name] = func
         return func
@@ -42,6 +63,14 @@ def workflow_node(name: str) -> Callable[[WorkflowNode], WorkflowNode]:
 
 
 def run_workflow(repo: Path, query: str, config: AppConfig, store: GraphStore, model: ModelClient) -> DevWorkflowState:
+    """执行一次完整 AI 软件工程工作流。
+
+    固定链路是 classify -> retrieve -> build_prompt -> generate -> verify，
+    验证失败时通过 prepare_retry 把失败日志放回上下文，再进入下一轮
+    generate/verify。最终无论验证是否通过，都会执行 review/evaluate/report，
+    并把所有可审阅产物写入 runs/<run_id>/。
+    """
+
     repo = repo.resolve()
     run_id = datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid4().hex[:8]
     output_dir = Path(config.workflow.output_dir) / run_id
@@ -73,6 +102,7 @@ def run_workflow(repo: Path, query: str, config: AppConfig, store: GraphStore, m
         state.retry_count = attempt
         _run_node("generate", state, runtime)
         _run_node("verify", state, runtime)
+        # 每轮生成/验证后都写 state，便于中断后排查当时的上下文和验证结果。
         _write_json(output_dir / "state.json", state.to_dict())
         if state.verify_report.get("passed"):
             break
@@ -133,6 +163,8 @@ def _node_verify(state: DevWorkflowState, runtime: WorkflowRuntime) -> None:
 
 @workflow_node("prepare_retry")
 def _node_prepare_retry(state: DevWorkflowState, runtime: WorkflowRuntime) -> None:
+    """把上一轮验证失败日志注入上下文，供下一轮生成修复使用。"""
+
     results = state.verify_report.get("results", [])
     state.error_log = _format_verify_summary(results)
     runtime.context.build_prompt(state)
@@ -148,6 +180,8 @@ def _node_review(state: DevWorkflowState, runtime: WorkflowRuntime) -> None:
 
 @workflow_node("evaluate")
 def _node_evaluate(state: DevWorkflowState, runtime: WorkflowRuntime) -> None:
+    """生成最小 evaluation 指标，为后续 Dashboard/报表预留数据形状。"""
+
     state.evaluation = {
         "model": state.target_model,
         "task_type": state.task_type,
@@ -170,6 +204,8 @@ def _node_report(state: DevWorkflowState, runtime: WorkflowRuntime) -> None:
 
 
 def _run_node(name: str, state: DevWorkflowState, runtime: WorkflowRuntime) -> None:
+    """按名称执行注册节点，并在节点缺失时给出明确错误。"""
+
     try:
         node = NODE_REGISTRY[name]
     except KeyError as exc:

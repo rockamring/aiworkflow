@@ -1,3 +1,10 @@
+"""知识图谱存储抽象和实现。
+
+GraphStore 是 AI Workflow 的知识索引存储边界。当前提供 Neo4j 和
+InMemory 两个实现：Neo4j 用于真实运行，InMemory 用于测试和离线 mock。
+这里保存的是最小图谱模型，不是完整 GraphRAG。
+"""
+
 from __future__ import annotations
 
 import re
@@ -12,6 +19,8 @@ from .state import KnowledgeChunk
 
 @dataclass(slots=True)
 class FileRecord:
+    """被索引的源码、配置或文档文件。"""
+
     repo_id: str
     path: str
     language: str
@@ -20,6 +29,8 @@ class FileRecord:
 
 @dataclass(slots=True)
 class SymbolRecord:
+    """从代码中提取的轻量符号记录。"""
+
     repo_id: str
     file_path: str
     name: str
@@ -30,6 +41,8 @@ class SymbolRecord:
 
 @dataclass(slots=True)
 class DocumentRecord:
+    """进入知识库的文档或规则。"""
+
     repo_id: str
     path: str
     kind: str
@@ -38,6 +51,13 @@ class DocumentRecord:
 
 
 class GraphStore(Protocol):
+    """图谱存储协议。
+
+    workflow、ingest 和 search 只依赖这个协议，不依赖具体数据库。
+    这让 Neo4j、InMemory、未来 PostgreSQL 图表或远程 Knowledge Service
+    可以共享同一组调用点。
+    """
+
     def ping(self) -> None:
         ...
 
@@ -64,6 +84,12 @@ class GraphStore(Protocol):
 
 
 class Neo4jGraphStore:
+    """使用 Neo4j 作为后端的 GraphStore 实现。
+
+    Store 在这里表示“存储层/数据存取对象”：它封装 Neo4j 连接、约束、
+    upsert 和搜索细节，业务层不直接写 Cypher。
+    """
+
     def __init__(self, config: Neo4jConfig):
         try:
             from neo4j import GraphDatabase  # type: ignore
@@ -78,6 +104,8 @@ class Neo4jGraphStore:
             raise GraphConnectionError(f"无法连接 Neo4j: {exc}") from exc
 
     def initialize(self) -> None:
+        """初始化最小唯一约束，保证同一 repo 内节点可重复 upsert。"""
+
         statements = [
             "CREATE CONSTRAINT file_id IF NOT EXISTS FOR (f:File) REQUIRE (f.repo_id, f.path) IS UNIQUE",
             "CREATE CONSTRAINT symbol_id IF NOT EXISTS FOR (s:Symbol) REQUIRE (s.repo_id, s.file_path, s.name, s.line) IS UNIQUE",
@@ -138,6 +166,12 @@ class Neo4jGraphStore:
             )
 
     def search(self, repo_id: str, query: str, tags: list[str], limit: int = 8) -> list[KnowledgeChunk]:
+        """执行 MVP 级图谱搜索。
+
+        当前策略是先按 repo_id 取一批候选节点，再在 Python 侧做关键词和
+        tag 打分排序。它是轻量候选召回 + 本地打分，不是完整 GraphRAG。
+        """
+
         terms = _query_terms(query + " " + " ".join(tags))
         with self._driver.session() as session:
             rows = session.run(
@@ -173,6 +207,11 @@ class Neo4jGraphStore:
 
 
 class InMemoryGraphStore:
+    """内存版 GraphStore。
+
+    主要用于单元测试和 mock 模式，避免测试依赖 Neo4j 服务。
+    """
+
     def __init__(self):
         self.files: list[FileRecord] = []
         self.symbols: list[SymbolRecord] = []
@@ -228,6 +267,8 @@ class InMemoryGraphStore:
 
 
 def language_for(path: Path) -> str:
+    """根据文件后缀推断索引用语言名。"""
+
     return {
         ".py": "python",
         ".ts": "typescript",
@@ -254,6 +295,8 @@ def _query_terms(text: str) -> list[str]:
 
 
 def _score_text(text: str, terms: list[str], tags: set[str]) -> float:
+    """MVP 级文本打分：关键词命中加分，任务标签命中权重更高。"""
+
     haystack = text.lower()
     score = sum(1 for term in terms if term in haystack)
     score += sum(2 for tag in tags if tag and tag.lower() in haystack)

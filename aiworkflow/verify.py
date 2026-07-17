@@ -1,3 +1,9 @@
+"""验证命令执行层。
+
+Verification 是 Tool/Execution 能力的最小闭环：命令从配置读取，执行前
+必须经过 CommandPolicy，结果会被写入 verify_report.json 和 state.json。
+"""
+
 from __future__ import annotations
 
 import subprocess
@@ -11,6 +17,12 @@ from .state import VerificationResult
 
 
 def run_verification(repo: Path, config: VerificationConfig, policy: CommandPolicy | None = None) -> list[VerificationResult]:
+    """在目标仓库目录执行配置中的验证命令。
+
+    每条命令都会先经过 CommandPolicy；被拒绝的命令不会执行，但会以
+    VerificationResult 形式记录拒绝原因，保证审计链路完整。
+    """
+
     repo = repo.resolve()
     policy = policy or CommandPolicy()
     if not config.commands:
@@ -77,6 +89,8 @@ def is_safe_verification_command(command: str) -> bool:
 
 
 def verification_summary(results: list[VerificationResult]) -> dict[str, object]:
+    """把多条验证结果聚合成报告摘要。"""
+
     return {
         "passed": all(item.passed for item in results),
         "results": [asdict(item) for item in results],

@@ -1,3 +1,10 @@
+"""配置加载与合并。
+
+配置来源优先级是显式路径、AIWORKFLOW_CONFIG、config/workflow.yaml、
+config/workflow.example.yaml。这里把 YAML/JSON/环境变量统一转换成 AppConfig，
+让 CLI 和 workflow 不直接处理原始配置字典。
+"""
+
 from __future__ import annotations
 
 import json
@@ -76,6 +83,8 @@ class WorkflowConfig:
 
 @dataclass(slots=True)
 class AppConfig:
+    """应用运行所需的完整配置快照。"""
+
     repo: RepoConfig = field(default_factory=RepoConfig)
     knowledge: KnowledgeConfig = field(default_factory=KnowledgeConfig)
     neo4j: Neo4jConfig = field(default_factory=Neo4jConfig)
@@ -96,6 +105,8 @@ def load_env_file(path: Path) -> None:
 
 
 def load_config(path: Path | None = None) -> AppConfig:
+    """加载配置文件并展开 ${ENV_NAME} 占位符。"""
+
     load_env_file(Path(".env"))
     config_path = resolve_config_path(path)
     data: dict[str, Any] = {}
@@ -109,6 +120,8 @@ def load_config(path: Path | None = None) -> AppConfig:
 
 
 def resolve_config_path(path: Path | None) -> Path | None:
+    """按约定解析最终使用的配置文件路径。"""
+
     if path is not None:
         return path
     env_path = os.getenv("AIWORKFLOW_CONFIG")
@@ -152,6 +165,8 @@ def _expand_env(value: Any) -> Any:
 
 
 def _build_config(data: dict[str, Any]) -> AppConfig:
+    """把原始 mapping 转换为强类型 AppConfig。"""
+
     repo_data = data.get("repo", {}) or {}
     knowledge_data = data.get("knowledge", {}) or {}
     neo4j_data = data.get("neo4j", {}) or {}

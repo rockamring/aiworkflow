@@ -1,3 +1,10 @@
+"""上下文服务。
+
+ContextService 是 Agent OS 里最核心的服务边界之一：它决定任务类型、
+检索哪些知识、如何控制上下文预算，以及如何把检索结果和 Prompt 模板
+组合成最终 system prompt。
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -12,12 +19,20 @@ DEFAULT_CONTEXT_BUDGET = 18000
 
 @dataclass(slots=True)
 class TaskClassification:
+    """一次用户请求的轻量分类结果。"""
+
     task_type: str
     tags: list[str]
     human_approval: bool
 
 
 class ContextService:
+    """负责把用户请求转成模型可消费上下文的应用服务。
+
+    它依赖 SearchService 召回知识片段，依赖 PromptService 加载模板；
+    自身不直接读取文件或访问 Neo4j，从而保持上下文编排和存储实现解耦。
+    """
+
     def __init__(
         self,
         search: SearchService,
@@ -29,6 +44,8 @@ class ContextService:
         self.char_budget = char_budget
 
     def classify(self, state: DevWorkflowState) -> None:
+        """根据用户请求写入任务类型、知识标签和人工审批标记。"""
+
         classification = classify_task(state.user_query)
         state.task_type = classification.task_type
         state.required_knowledge_tags = classification.tags
@@ -43,6 +60,8 @@ class ContextService:
         )
 
     def retrieve(self, state: DevWorkflowState) -> None:
+        """按任务分类结果检索知识片段，并记录检索统计。"""
+
         response = self.search.search(
             SearchRequest(
                 repo_id=str(state.repo_meta["repo_id"]),
@@ -56,6 +75,12 @@ class ContextService:
         state.workflow_steps.append({"node": "retrieve", **response.stats})
 
     def build_prompt(self, state: DevWorkflowState) -> None:
+        """构建最终 system prompt。
+
+        这里会先按字符预算压缩/截断检索片段，再把任务类型、知识标签、
+        上轮验证失败日志和任务 Prompt 一起填入模板。
+        """
+
         bundle = self.prompts.load_bundle(state.task_type)
         context_block, summary = build_context_block(state.knowledge_chunks, self.char_budget)
         error_block = f"\n\n## 上轮校验失败\n{state.error_log}" if state.error_log else ""
@@ -71,6 +96,8 @@ class ContextService:
         state.workflow_steps.append({"node": "build_prompt", **summary})
 
     def build_review_prompt(self, state: DevWorkflowState) -> str:
+        """为独立 review pass 构建评审 Prompt。"""
+
         bundle = self.prompts.load_bundle(state.task_type)
         return self.prompts.render(
             bundle.review,
@@ -84,6 +111,11 @@ class ContextService:
 
 
 def classify_task(query: str) -> TaskClassification:
+    """基于关键词做 MVP 级任务分类。
+
+    这是可替换实现：后续可以升级为模型分类、规则配置或项目级分类器。
+    """
+
     text = query.lower()
     rules = [
         ("crash_fix", ["crash", "崩溃", "exception", "traceback"], ["crash", "debugging"]),
@@ -99,6 +131,12 @@ def classify_task(query: str) -> TaskClassification:
 
 
 def build_context_block(chunks: list[KnowledgeChunk], char_budget: int = DEFAULT_CONTEXT_BUDGET) -> tuple[str, dict[str, object]]:
+    """把检索片段格式化为上下文块，并返回预算统计。
+
+    当前使用字符预算近似 token 预算，保证 prompt 不会无界膨胀。
+    后续接入 tokenizer 后，可以把这里替换为真实 token budget。
+    """
+
     if not chunks:
         return "未检索到相关知识片段。", {
             "budget_chars": char_budget,

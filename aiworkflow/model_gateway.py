@@ -1,3 +1,10 @@
+"""模型网关抽象。
+
+业务层只依赖 ModelClient.complete()，不直接绑定某个具体模型供应商。
+当前提供 mock 和 OpenAI-compatible 两种实现，为后续 Model Router 或
+Agent Adapter 预留边界。
+"""
+
 from __future__ import annotations
 
 import json
@@ -11,16 +18,22 @@ from .errors import ModelGatewayError
 
 @dataclass(slots=True)
 class ModelResponse:
+    """模型返回内容和实际使用的模型名。"""
+
     content: str
     model: str
 
 
 class ModelClient:
+    """模型客户端协议基类。"""
+
     def complete(self, system_prompt: str, user_prompt: str) -> ModelResponse:
         raise NotImplementedError
 
 
 class MockModelClient(ModelClient):
+    """离线 mock 模型，用于测试工作流闭环。"""
+
     def __init__(self, model_name: str = "mock"):
         self.model_name = model_name
 
@@ -40,6 +53,8 @@ class MockModelClient(ModelClient):
 
 
 class OpenAICompatibleModelClient(ModelClient):
+    """OpenAI-compatible / LiteLLM 风格的 chat completions 客户端。"""
+
     def __init__(self, config: ModelConfig):
         self.config = config
         if not config.base_url:
@@ -82,6 +97,8 @@ class OpenAICompatibleModelClient(ModelClient):
 
 
 def make_model_client(config: ModelConfig, force_mock: bool = False) -> ModelClient:
+    """根据配置选择 mock 或真实模型客户端。"""
+
     if force_mock or config.model.lower().startswith("mock"):
         return MockModelClient(config.model)
     return OpenAICompatibleModelClient(config)

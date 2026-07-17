@@ -1,3 +1,9 @@
+"""工作流状态数据结构。
+
+这些 dataclass 是 workflow 节点之间传递和最终写入 state.json 的公共
+状态形状。它们应保持可序列化，方便后续审计、复现和 Dashboard 分析。
+"""
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
@@ -6,6 +12,8 @@ from typing import Any
 
 @dataclass(slots=True)
 class KnowledgeChunk:
+    """一次检索返回的上下文片段。"""
+
     source: str
     kind: str
     text: str
@@ -15,6 +23,8 @@ class KnowledgeChunk:
 
 @dataclass(slots=True)
 class VerificationResult:
+    """单条验证命令的执行结果和安全策略决策。"""
+
     name: str
     command: str
     passed: bool
@@ -28,6 +38,12 @@ class VerificationResult:
 
 @dataclass(slots=True)
 class DevWorkflowState:
+    """一次 AI workflow 的完整状态快照。
+
+    workflow 中的每个节点都只修改这个状态对象的一部分，最终整体写入
+    state.json，作为可审计、可复现的运行记录。
+    """
+
     user_query: str
     repo_meta: dict[str, Any]
     file_context: str = ""
