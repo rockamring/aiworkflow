@@ -1,20 +1,28 @@
 # 演进路线图
 
-当前工程已经从单纯 AI workflow demo 进入 Agent OS 单体内核 MVP 阶段。后续演进应继续保持小步、可测试、可审阅。
+当前工程已经从单纯 AI workflow demo 进入 AI Workflow / Agent OS 单体内核 MVP 阶段。后续演进应继续保持小步、可测试、可审阅。
+
+当前第一阶段重点是 Context Pack / Prompt Pack，但项目定位仍是 Agent OS 平台，不应被收窄成单纯 Context Engine。
 
 ## 短期
 
 - 强化 Context 选择逻辑，提升检索片段排序和上下文预算控制。
-- 完善 Prompt 模板体系，让不同任务类型拥有更明确的生成和评审规则。
+- 完善 Prompt Pack 模板体系，让不同任务类型拥有更明确的 Agent 指令。
+- 固化 Agent / Tool / Permission 契约层，包括 `AgentRunRequest`、`AgentRunResult`、`AgentEvent`、`ToolRequest`、`ToolResult`、`PermissionDecision`。
+- 建设 Agent Adapter 抽象层：dry-run 和 `codex_cli` 最小运行时已落地，后续补 Claude Code、权限审批和工具代理。
+- 扩展 Project Registry：基础版已支持 repo、默认 Agent 和 output_dir 绑定，后续补项目级配置合并、权限策略和团队归属。
+- 扩展 Run Store：文件版摘要索引和事件账本已落地，后续补更丰富查询、失败事件和真实 Agent run / Tool call 落账。
+- 建设 Artifact Schema，统一描述 prompt、manifest、日志、patch、报告等产物的名称、类型、路径、来源和媒体类型。
+- 结构化 Agent Profile：基础配置契约已落地，可描述 adapter、command、input_mode、output_mode、默认权限和运行限制；后续接入 `codex_cli`、`claude_code_cli` 时继续细化真实命令参数。
 - 增加更多 C++ / C# / Lua 索引测试样例。
 - 让 `final_report.md` 更适合人类审阅，并保持 `state.json` 适合机器分析。
-- 继续保证 mock 模式离线可跑通。
+- 继续保证 prepare 流程离线可跑通。
 
 ## 中期
 
 - 建设 Hybrid Search：关键词、符号、文档、图谱、Recent、Embedding 共同排序。
 - 支持增量索引，避免每次 ingest 全量重建目标仓库知识。
-- 将 Review 拆成更细的评审维度，例如架构、性能、测试、线程、安全。
+- 强化 Context Pack manifest，让 Agent Adapter 和后续平台 API 可以稳定复用。
 - 扩展 `CommandPolicy`，记录更完整的命令审计信息。
 - 为 Tool Service / MCP 执行入口预留统一权限策略。
 
@@ -41,4 +49,4 @@
 
 - 是否提升了 Agent 可获得的有效 Context？
 - 是否让 Tool / Verification 更受控、更可审计？
-- 是否保持了本地 MVP 的可运行性和 mock 测试闭环？
+- 是否保持了本地 MVP 的可运行性和离线测试闭环？

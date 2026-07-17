@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "aiworkflow"
 version = "0.1.0"
-description = "CLI-first AI coding workflow MVP with Neo4j retrieval, OpenAI-compatible model gateway, and verification loop."
+description = "CLI-first AI Workflow / Agent OS MVP with Context Pack generation, Neo4j retrieval, and controlled verification hints."
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "AI Workflow Team" }]

@@ -39,11 +39,50 @@ neo4j:
   user: "${NEO4J_USER}"
   password: "${NEO4J_PASSWORD}"
 
-model:
-  base_url: "${MODEL_BASE_URL}"
-  api_key: "${MODEL_API_KEY}"
-  model: "${MODEL_NAME}"
-  timeout_seconds: 90
+context:
+  budget_chars: 18000
+  search_limit: 8
+
+agent:
+  default: "codex"
+  profiles:
+    generic:
+      prompt_style: "generic"
+      adapter: "dry_run"
+      command: ""
+      args: []
+      input_mode: "none"
+      output_mode: "events"
+      default_permissions: []
+      timeout_seconds: 60
+      env: {}
+      extra_instructions: []
+    codex:
+      prompt_style: "codex"
+      adapter: "codex_cli"
+      command: "codex"
+      args: []
+      input_mode: "stdin"
+      output_mode: "stream"
+      default_permissions:
+        - "read_repo"
+      timeout_seconds: 900
+      env: {}
+      extra_instructions:
+        - "优先使用提供的上下文和文件路径，只有缺口明确时再检索。"
+    claude-code:
+      prompt_style: "claude-code"
+      adapter: "claude_code_cli"
+      command: "claude"
+      args: []
+      input_mode: "stdin"
+      output_mode: "stream"
+      default_permissions:
+        - "read_repo"
+      timeout_seconds: 900
+      env: {}
+      extra_instructions:
+        - "先基于上下文制定最小修改策略，再读取必要文件。"
 
 verification:
   commands:
@@ -51,5 +90,12 @@ verification:
       command: "python -m pytest"
 
 workflow:
-  max_retries: 3
   output_dir: "runs"
+
+# 可选：为真实项目配置别名。使用 --project 时会读取 repo、默认 agent，
+# 并默认把产物写入 runs/<project>/。
+# projects:
+#   my_game:
+#     repo: "G:/games/MyGame"
+#     agent: "codex"
+#     output_dir: "runs/my_game"

@@ -1,4 +1,5 @@
 from aiworkflow.context import ContextService, build_context_block, classify_task
+from aiworkflow.graph import DocumentRecord
 from aiworkflow.graph import InMemoryGraphStore
 from aiworkflow.search import SearchService
 from aiworkflow.state import KnowledgeChunk
@@ -31,6 +32,14 @@ def test_context_block_records_budget_and_sources():
 
 def test_context_service_builds_prompt_from_search_results():
     store = InMemoryGraphStore()
+    store.upsert_document(DocumentRecord("repo", "docs/render.md", "document", "Renderer crash notes", ["crash"]))
     service = ContextService(SearchService(store))
 
-    assert service.char_budget > 0
+    classification = service.classify("修复 Renderer crash")
+    response = service.retrieve("repo", "Renderer crash", classification.tags)
+    built = service.build_context(response.chunks)
+
+    assert classification.task_type == "crash_fix"
+    assert response.stats["returned"] == 1
+    assert "Renderer crash notes" in built.text
+    assert built.summary["chunks_included"] == 1

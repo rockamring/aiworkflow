@@ -1,7 +1,7 @@
 """验证命令执行层。
 
 Verification 是 Tool/Execution 能力的最小闭环：命令从配置读取，执行前
-必须经过 CommandPolicy，结果会被写入 verify_report.json 和 state.json。
+必须经过 CommandPolicy，结果会以结构化对象返回，供 CLI 或后续平台记录。
 """
 
 from __future__ import annotations

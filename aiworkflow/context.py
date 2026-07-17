@@ -1,17 +1,16 @@
 """上下文服务。
 
 ContextService 是 Agent OS 里最核心的服务边界之一：它决定任务类型、
-检索哪些知识、如何控制上下文预算，以及如何把检索结果和 Prompt 模板
-组合成最终 system prompt。
+检索哪些知识，以及如何控制上下文预算。它不依赖具体工作流状态对象，
+因此可以被 CLI、Agent Adapter、API 或测试直接复用。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .prompt import PromptService
-from .search import SearchRequest, SearchService
-from .state import DevWorkflowState, KnowledgeChunk
+from .search import SearchRequest, SearchResponse, SearchService
+from .state import KnowledgeChunk
 
 
 DEFAULT_CONTEXT_BUDGET = 18000
@@ -26,88 +25,51 @@ class TaskClassification:
     human_approval: bool
 
 
-class ContextService:
-    """负责把用户请求转成模型可消费上下文的应用服务。
+@dataclass(slots=True)
+class ContextBuildResult:
+    """格式化后的上下文正文和预算统计。"""
 
-    它依赖 SearchService 召回知识片段，依赖 PromptService 加载模板；
-    自身不直接读取文件或访问 Neo4j，从而保持上下文编排和存储实现解耦。
+    text: str
+    summary: dict[str, object]
+
+
+class ContextService:
+    """负责把用户请求转成 Agent 可消费上下文的应用服务。
+
+    它依赖 SearchService 召回知识片段；自身不直接读取文件或访问 Neo4j，
+    从而保持上下文编排和存储实现解耦。
     """
 
     def __init__(
         self,
         search: SearchService,
-        prompts: PromptService | None = None,
         char_budget: int = DEFAULT_CONTEXT_BUDGET,
     ):
         self.search = search
-        self.prompts = prompts or PromptService()
         self.char_budget = char_budget
 
-    def classify(self, state: DevWorkflowState) -> None:
-        """根据用户请求写入任务类型、知识标签和人工审批标记。"""
+    def classify(self, query: str) -> TaskClassification:
+        """根据用户请求返回任务类型、知识标签和人工审批标记。"""
 
-        classification = classify_task(state.user_query)
-        state.task_type = classification.task_type
-        state.required_knowledge_tags = classification.tags
-        state.human_approval = classification.human_approval
-        state.workflow_steps.append(
-            {
-                "node": "classify",
-                "task_type": state.task_type,
-                "tags": state.required_knowledge_tags,
-                "human_approval": state.human_approval,
-            }
-        )
+        return classify_task(query)
 
-    def retrieve(self, state: DevWorkflowState) -> None:
-        """按任务分类结果检索知识片段，并记录检索统计。"""
+    def retrieve(self, repo_id: str, query: str, tags: list[str], limit: int = 8) -> SearchResponse:
+        """按任务分类结果检索知识片段，并返回检索统计。"""
 
-        response = self.search.search(
+        return self.search.search(
             SearchRequest(
-                repo_id=str(state.repo_meta["repo_id"]),
-                query=state.user_query,
-                tags=state.required_knowledge_tags,
-                limit=8,
+                repo_id=repo_id,
+                query=query,
+                tags=tags,
+                limit=limit,
             )
         )
-        state.knowledge_chunks = response.chunks
-        state.search_stats = response.stats
-        state.workflow_steps.append({"node": "retrieve", **response.stats})
 
-    def build_prompt(self, state: DevWorkflowState) -> None:
-        """构建最终 system prompt。
+    def build_context(self, chunks: list[KnowledgeChunk]) -> ContextBuildResult:
+        """按预算格式化检索片段。"""
 
-        这里会先按字符预算压缩/截断检索片段，再把任务类型、知识标签、
-        上轮验证失败日志和任务 Prompt 一起填入模板。
-        """
-
-        bundle = self.prompts.load_bundle(state.task_type)
-        context_block, summary = build_context_block(state.knowledge_chunks, self.char_budget)
-        error_block = f"\n\n## 上轮校验失败\n{state.error_log}" if state.error_log else ""
-        values = {
-            "task_type": state.task_type,
-            "knowledge_tags": ", ".join(state.required_knowledge_tags),
-            "context_block": context_block,
-            "error_block": error_block,
-            "task_prompt": bundle.task,
-        }
-        state.system_prompt = self.prompts.render(bundle.system, values)
-        state.context_summary = summary
-        state.workflow_steps.append({"node": "build_prompt", **summary})
-
-    def build_review_prompt(self, state: DevWorkflowState) -> str:
-        """为独立 review pass 构建评审 Prompt。"""
-
-        bundle = self.prompts.load_bundle(state.task_type)
-        return self.prompts.render(
-            bundle.review,
-            {
-                "task_type": state.task_type,
-                "knowledge_tags": ", ".join(state.required_knowledge_tags),
-                "context_summary": state.context_summary,
-                "change_patch": state.ai_diff,
-            },
-        )
+        text, summary = build_context_block(chunks, self.char_budget)
+        return ContextBuildResult(text=text, summary=summary)
 
 
 def classify_task(query: str) -> TaskClassification:
